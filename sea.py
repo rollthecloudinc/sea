@@ -4,6 +4,9 @@ import matplotlib.pyplot as plt
 import torch
 from torchvision import transforms
 import timm
+from skimage.feature import local_binary_pattern
+import colorsys
+from PIL import Image
 
 def depth_estimation_heatmap(image_path, output_path):
     # Load the input image
@@ -217,6 +220,289 @@ def generate_navigable_heatmap(image_path, output_heatmap_path):
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
+def analyze_texture(image_path, output_path, radius=3, num_points=24, threshold=0.2):
+    # Load the input image
+    image = cv2.imread(image_path)
+    if image is None:
+        print("Error: Image not found!")
+        return
+
+    # Convert to grayscale for texture analysis
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Compute Local Binary Pattern (LBP)
+    print("Performing texture analysis using Local Binary Patterns (LBP)...")
+    lbp = local_binary_pattern(gray, num_points, radius, method="uniform")
+
+    # Normalize LBP to range [0, 1]
+    lbp_normalized = lbp / np.max(lbp)
+
+    # Threshold for proximity detection (high texture density indicates proximity)
+    print(f"Applying proximity threshold: {threshold}")
+    proximity_mask = np.where(lbp_normalized > threshold, 255, 0).astype(np.uint8)
+
+    # Find contours of "close" regions
+    contours, _ = cv2.findContours(proximity_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Draw contours on the original image
+    annotated_image = image.copy()
+    for contour in contours:
+        cv2.drawContours(annotated_image, [contour], -1, (0, 0, 255), 2)  # Red for close objects
+
+    # Save the annotated image
+    cv2.imwrite(output_path, annotated_image)
+    print(f"Texture-based proximity detection saved to {output_path}")
+
+    # Display the annotated image
+    plt.imshow(cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB))
+    plt.title("Texture-Based Proximity Detection")
+    plt.axis("off")
+    plt.show()
+
+def extract_and_overlay_with_transparency_red(
+    image_path, grayscale_path, overlay_path, highlight_color=(255, 0, 0, 128)
+):
+    """
+    Generate both a grayscale image based on red saturation and a transparent overlay image.
+
+    Args:
+        image_path (str): Path to the input image.
+        grayscale_path (str): Path to save the grayscale output image.
+        overlay_path (str): Path to save the transparent overlay image.
+        highlight_color (tuple): RGBA color to highlight detected red areas (default is semi-transparent red).
+    """
+    # Load the image
+    image = Image.open(image_path).convert('RGBA')
+    img_array = np.array(image, dtype=np.uint8)
+
+    # Extract RGB channels and normalize to [0, 1]
+    img_rgb = img_array[..., :3] / 255.0
+    R, G, B = img_rgb[..., 0], img_rgb[..., 1], img_rgb[..., 2]
+
+    # Convert RGB to HSV
+    H, S, V = np.vectorize(colorsys.rgb_to_hsv)(R, G, B)
+
+    # Create a mask for pixels in the red hue range (two ranges: 0°–30° and 330°–360°)
+    red_mask = ((H >= 0.0) & (H <= 30 / 360)) | ((H >= 330 / 360) & (H <= 1.0))
+
+    # Generate the grayscale image based on saturation
+    grayscale = np.where(red_mask, (S * 255).astype(np.uint8), 255)  # Non-red pixels are white
+    grayscale_image = Image.fromarray(grayscale, mode='L')
+    grayscale_image.save(grayscale_path)
+    print(f"Grayscale image saved to {grayscale_path}")
+
+    # Generate the transparent overlay image
+    overlay_array = np.copy(img_array)
+    overlay_array[red_mask] = highlight_color  # Apply highlight color to detected red pixels
+    overlay_image = Image.fromarray(overlay_array, mode='RGBA')
+    overlay_image.save(overlay_path)
+    print(f"Transparent overlay image saved to {overlay_path}")
+
+def extract_and_overlay_with_transparency_blue(
+    image_path, grayscale_path, overlay_path, hue_min=200, hue_max=240, highlight_color=(0, 0, 255, 128)
+):
+    """
+    Generate both a grayscale image based on blue saturation and a transparent overlay image.
+
+    Args:
+        image_path (str): Path to the input image.
+        grayscale_path (str): Path to save the grayscale output image.
+        overlay_path (str): Path to save the transparent overlay image.
+        hue_min (int): Minimum hue value for blue detection (default is 200).
+        hue_max (int): Maximum hue value for blue detection (default is 240).
+        highlight_color (tuple): RGBA color to highlight detected blue areas (default is semi-transparent blue).
+    """
+    # Load the image
+    image = Image.open(image_path).convert('RGBA')
+    img_array = np.array(image, dtype=np.uint8)
+
+    # Extract RGB channels and normalize to [0, 1]
+    img_rgb = img_array[..., :3] / 255.0
+    R, G, B = img_rgb[..., 0], img_rgb[..., 1], img_rgb[..., 2]
+
+    # Convert RGB to HSV
+    H, S, V = np.vectorize(colorsys.rgb_to_hsv)(R, G, B)
+
+    # Create a mask for pixels in the blue hue range
+    blue_mask = (H >= hue_min / 360) & (H <= hue_max / 360)
+
+    # Generate the grayscale image based on saturation
+    grayscale = np.where(blue_mask, (S * 255).astype(np.uint8), 255)  # Non-blue pixels are white
+    grayscale_image = Image.fromarray(grayscale, mode='L')
+    grayscale_image.save(grayscale_path)
+    print(f"Grayscale image saved to {grayscale_path}")
+
+    # Generate the transparent overlay image
+    overlay_array = np.copy(img_array)
+    overlay_array[blue_mask] = highlight_color  # Apply highlight color to detected blue pixels
+    overlay_image = Image.fromarray(overlay_array, mode='RGBA')
+    overlay_image.save(overlay_path)
+    print(f"Transparent overlay image saved to {overlay_path}")
+
+def extract_and_overlay_with_transparency_yellow(
+    image_path, grayscale_path, overlay_path, hue_min=45, hue_max=75, highlight_color=(255, 255, 0, 128)
+):
+    """
+    Generate both a grayscale image based on yellow saturation and a transparent overlay image.
+
+    Args:
+        image_path (str): Path to the input image.
+        grayscale_path (str): Path to save the grayscale output image.
+        overlay_path (str): Path to save the transparent overlay image.
+        hue_min (int): Minimum hue value for yellow detection (default is 45).
+        hue_max (int): Maximum hue value for yellow detection (default is 75).
+        highlight_color (tuple): RGBA color to highlight detected yellow areas (default is semi-transparent yellow).
+    """
+    # Load the image
+    image = Image.open(image_path).convert('RGBA')
+    img_array = np.array(image, dtype=np.uint8)
+
+    # Extract RGB channels and normalize to [0, 1]
+    img_rgb = img_array[..., :3] / 255.0
+    R, G, B = img_rgb[..., 0], img_rgb[..., 1], img_rgb[..., 2]
+
+    # Convert RGB to HSV
+    H, S, V = np.vectorize(colorsys.rgb_to_hsv)(R, G, B)
+
+    # Create a mask for pixels in the yellow hue range
+    yellow_mask = (H >= hue_min / 360) & (H <= hue_max / 360)
+
+    # Generate the grayscale image based on saturation
+    grayscale = np.where(yellow_mask, (S * 255).astype(np.uint8), 255)  # Non-yellow pixels are white
+    grayscale_image = Image.fromarray(grayscale, mode='L')
+    grayscale_image.save(grayscale_path)
+    print(f"Grayscale image saved to {grayscale_path}")
+
+    # Generate the transparent overlay image
+    overlay_array = np.copy(img_array)
+    overlay_array[yellow_mask] = highlight_color  # Apply highlight color to detected yellow pixels
+    overlay_image = Image.fromarray(overlay_array, mode='RGBA')
+    overlay_image.save(overlay_path)
+    print(f"Transparent overlay image saved to {overlay_path}")
+
+def extract_and_overlay_with_transparency_orange(
+    image_path, grayscale_path, overlay_path, hue_min=30, hue_max=60, highlight_color=(255, 165, 0, 128)
+):
+    """
+    Generate both a grayscale image based on orange saturation and a transparent overlay image.
+
+    Args:
+        image_path (str): Path to the input image.
+        grayscale_path (str): Path to save the grayscale output image.
+        overlay_path (str): Path to save the transparent overlay image.
+        hue_min (int): Minimum hue value for orange detection (default is 30).
+        hue_max (int): Maximum hue value for orange detection (default is 60).
+        highlight_color (tuple): RGBA color to highlight detected orange areas (default is semi-transparent orange).
+    """
+    # Load the image
+    image = Image.open(image_path).convert('RGBA')
+    img_array = np.array(image, dtype=np.uint8)
+
+    # Extract RGB channels and normalize to [0, 1]
+    img_rgb = img_array[..., :3] / 255.0
+    R, G, B = img_rgb[..., 0], img_rgb[..., 1], img_rgb[..., 2]
+
+    # Convert RGB to HSV
+    H, S, V = np.vectorize(colorsys.rgb_to_hsv)(R, G, B)
+
+    # Create a mask for pixels in the orange hue range
+    orange_mask = (H >= hue_min / 360) & (H <= hue_max / 360)
+
+    # Generate the grayscale image based on saturation
+    grayscale = np.where(orange_mask, (S * 255).astype(np.uint8), 255)  # Non-orange pixels are white
+    grayscale_image = Image.fromarray(grayscale, mode='L')
+    grayscale_image.save(grayscale_path)
+    print(f"Grayscale image saved to {grayscale_path}")
+
+    # Generate the transparent overlay image
+    overlay_array = np.copy(img_array)
+    overlay_array[orange_mask] = highlight_color  # Apply highlight color to detected orange pixels
+    overlay_image = Image.fromarray(overlay_array, mode='RGBA')
+    overlay_image.save(overlay_path)
+    print(f"Transparent overlay image saved to {overlay_path}")
+
+def extract_and_overlay_with_transparency_green(
+        image_path, grayscale_path, overlay_path, hue_min=90, hue_max=150, highlight_color=(0, 255, 0, 128)
+):
+    """
+    Generate both a grayscale image based on green saturation and a transparent overlay image.
+
+    Args:
+        image_path (str): Path to the input image.
+        grayscale_path (str): Path to save the grayscale output image.
+        overlay_path (str): Path to save the transparent overlay image.
+        hue_min (int): Minimum hue value for green detection (default is 90).
+        hue_max (int): Maximum hue value for green detection (default is 150).
+        highlight_color (tuple): RGBA color to highlight detected green areas (default is semi-transparent green).
+    """
+    # Load the image
+    image = Image.open(image_path).convert('RGBA')
+    img_array = np.array(image, dtype=np.uint8)
+
+    # Extract RGB channels and normalize to [0, 1]
+    img_rgb = img_array[..., :3] / 255.0
+    R, G, B = img_rgb[..., 0], img_rgb[..., 1], img_rgb[..., 2]
+
+    # Convert RGB to HSV
+    H, S, V = np.vectorize(colorsys.rgb_to_hsv)(R, G, B)
+
+    # Create a mask for pixels in the green hue range
+    green_mask = (H >= hue_min / 360) & (H <= hue_max / 360)
+
+    # Generate the grayscale image based on saturation
+    grayscale = np.where(green_mask, (S * 255).astype(np.uint8), 255)  # Non-green pixels are white
+    grayscale_image = Image.fromarray(grayscale, mode='L')
+    grayscale_image.save(grayscale_path)
+    print(f"Grayscale image saved to {grayscale_path}")
+
+    # Generate the transparent overlay image
+    overlay_array = np.copy(img_array)
+    overlay_array[green_mask] = highlight_color  # Apply highlight color to detected green pixels
+    overlay_image = Image.fromarray(overlay_array, mode='RGBA')
+    overlay_image.save(overlay_path)
+    print(f"Transparent overlay image saved to {overlay_path}")
+
+def extract_and_overlay_with_transparency_violet(
+    image_path, grayscale_path, overlay_path, hue_min=270, hue_max=300, highlight_color=(128, 0, 128, 128)
+):
+    """
+    Generate both a grayscale image based on violet saturation and a transparent overlay image.
+
+    Args:
+        image_path (str): Path to the input image.
+        grayscale_path (str): Path to save the grayscale output image.
+        overlay_path (str): Path to save the transparent overlay image.
+        hue_min (int): Minimum hue value for violet detection (default is 270).
+        hue_max (int): Maximum hue value for violet detection (default is 300).
+        highlight_color (tuple): RGBA color to highlight detected violet areas (default is semi-transparent violet).
+    """
+    # Load the image
+    image = Image.open(image_path).convert('RGBA')
+    img_array = np.array(image, dtype=np.uint8)
+
+    # Extract RGB channels and normalize to [0, 1]
+    img_rgb = img_array[..., :3] / 255.0
+    R, G, B = img_rgb[..., 0], img_rgb[..., 1], img_rgb[..., 2]
+
+    # Convert RGB to HSV
+    H, S, V = np.vectorize(colorsys.rgb_to_hsv)(R, G, B)
+
+    # Create a mask for pixels in the violet hue range
+    violet_mask = (H >= hue_min / 360) & (H <= hue_max / 360)
+
+    # Generate the grayscale image based on saturation
+    grayscale = np.where(violet_mask, (S * 255).astype(np.uint8), 255)  # Non-violet pixels are white
+    grayscale_image = Image.fromarray(grayscale, mode='L')
+    grayscale_image.save(grayscale_path)
+    print(f"Grayscale image saved to {grayscale_path}")
+
+    # Generate the transparent overlay image
+    overlay_array = np.copy(img_array)
+    overlay_array[violet_mask] = highlight_color  # Apply highlight color to detected violet pixels
+    overlay_image = Image.fromarray(overlay_array, mode='RGBA')
+    overlay_image.save(overlay_path)
+    print(f"Transparent overlay image saved to {overlay_path}")
+
 if __name__ == "__main__":
     # Provide the input image path and output image path
     input_image_path = "input_image.jpg"  # Replace with your image file path
@@ -224,8 +510,89 @@ if __name__ == "__main__":
     output_image_path_depth = "sea_output_depth.jpg"  # Replace with your desired output file path
     output_image_path_shapes = "sea_output_shapes.jpg"  # Replace with your desired output file path
     output_image_path_edges = "sea_output_edges.jpg"  # Replace with your desired output file path
+    output_image_path_texture = "sea_output_texture.jpg"  # Replace with your desired output file path
 
     # Run the function
     depth_estimation_heatmap(input_image_path, output_image_path_depth)
     detect_shapes(input_image_path, output_image_path_shapes)
+    analyze_texture(input_image_path, output_image_path_texture)
+
+    grayscale_output_path_red = "sea_grayscale_red_output.jpg"  # Path for grayscale output
+    transparent_overlay_output_path_red = "sea_transparent_red_overlay_output.png"  # Path for transparent overlay output
+
+    # Call the function
+    extract_and_overlay_with_transparency_red(
+        image_path=input_image_path,
+        grayscale_path=grayscale_output_path_red,
+        overlay_path=transparent_overlay_output_path_red,
+        highlight_color=(255, 0, 0, 128)  # Semi-transparent red highlight
+    )
+
+    grayscale_output_path_blue = "sea_grayscale_blue_output.jpg"  # Path for grayscale output
+    transparent_overlay_output_path_blue = "sea_transparent_blue_overlay_output.png"  # Path for transparent overlay output
+
+    # Call the function with adjusted parameters for blue detection
+    extract_and_overlay_with_transparency_blue(
+        image_path=input_image_path,
+        grayscale_path=grayscale_output_path_blue,
+        overlay_path=transparent_overlay_output_path_blue,
+        hue_min=200,  # Minimum hue value for blue detection (200°)
+        hue_max=240,  # Maximum hue value for blue detection (240°)
+        highlight_color=(0, 0, 255, 128)  # Semi-transparent blue highlight
+    )
+
+    grayscale_output_path_yellow = "sea_grayscale_yellow_output.jpg"  # Path for grayscale output
+    transparent_overlay_output_path_yellow = "sea_transparent_yellow_overlay_output.png"  # Path for transparent overlay output
+
+    # Call the function
+    extract_and_overlay_with_transparency_yellow(
+        image_path=input_image_path,
+        grayscale_path=grayscale_output_path_yellow,
+        overlay_path=transparent_overlay_output_path_yellow,
+        hue_min=45,  # Minimum hue value for yellow detection (45°)
+        hue_max=75,  # Maximum hue value for yellow detection (75°)
+        highlight_color=(255, 255, 0, 128)  # Semi-transparent yellow highlight
+    )
+
+    grayscale_output_path_orange = "sea_grayscale_orange_output.jpg"  # Path for grayscale output
+    transparent_overlay_output_path_orange = "sea_transparent_orange_overlay_output.png"  # Path for transparent overlay output
+
+    # Call the function
+    extract_and_overlay_with_transparency_orange(
+        image_path=input_image_path,
+        grayscale_path=grayscale_output_path_orange,
+        overlay_path=transparent_overlay_output_path_orange,
+        hue_min=30,  # Minimum hue value for orange detection (30°)
+        hue_max=60,  # Maximum hue value for orange detection (60°)
+        highlight_color=(255, 165, 0, 128)  # Semi-transparent orange highlight
+    )
+
+    grayscale_output_path_green = "sea_grayscale_green_output.jpg"  # Path for grayscale output
+    transparent_overlay_output_path_green = "sea_transparent_green_overlay_output.png"  # Path for transparent overlay output
+
+    # Call the function
+    extract_and_overlay_with_transparency_green(
+        image_path=input_image_path,
+        grayscale_path=grayscale_output_path_green,
+        overlay_path=transparent_overlay_output_path_green,
+        hue_min=90,  # Minimum hue value for green detection (90°)
+        hue_max=150,  # Maximum hue value for green detection (150°)
+        highlight_color=(0, 255, 0, 128)  # Semi-transparent green highlight
+    )
+
+    grayscale_output_path_violet = "sea_grayscale_violet_output.jpg"  # Path for grayscale output
+    transparent_overlay_output_path_violet = "sea_transparent_violet_overlay_output.png"  # Path for transparent overlay output
+
+    # Call the function
+    extract_and_overlay_with_transparency_violet(
+        image_path=input_image_path,
+        grayscale_path=grayscale_output_path_violet,
+        overlay_path=transparent_overlay_output_path_violet,
+        hue_min=270,  # Minimum hue value for violet detection (270°)
+        hue_max=300,  # Maximum hue value for violet detection (300°)
+        highlight_color=(128, 0, 128, 128)  # Semi-transparent violet highlight
+    )
+
+    # @todo: This is erroring
+    # cv2.error: OpenCV(4.11.0) /io/opencv/modules/highgui/src/window.cpp:1301: error: (-2:Unspecified error) The function is not implemented. Rebuild the library with Windows, GTK+ 2.x or Cocoa support. If you are on Ubuntu or Debian, install libgtk2.0-dev and pkg-config, then re-run cmake or configure script in function 'cvShowImage'
     generate_navigable_heatmap(input_image_path, output_image_path_edges)
