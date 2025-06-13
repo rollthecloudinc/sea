@@ -1,0 +1,7 @@
+pip3 install numpy
+pip3 install pillow
+pip3 install opencv-python-headless
+pip3 install matplotlib
+pip3 install torch torchvision
+pip3 install timm
+pip3 install scikit-image
