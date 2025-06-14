@@ -89,7 +89,7 @@ def detect_shapes(image_path, output_path):
 
         # Draw the contour and label the shape
         cv2.drawContours(image, [contour], -1, (0, 255, 0), 2)
-        cv2.putText(image, shape_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        #cv2.putText(image, shape_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
     cv2.imwrite(output_path, image)
     print(f"Shapes detected and saved to {output_path}")
@@ -371,6 +371,268 @@ def generate_temperature_heatmap_v3(
     # Return the temperature map as a numpy array for further analysis if needed
     return temperature_map_normalized
 
+def generate_obstacle_heatmap(detected_shapes_image_path, output_heatmap_path):
+    """
+    Generate a heatmap where areas with obstacles or hard edges are highlighted as warm (red),
+    and free space is highlighted as cool (blue).
+
+    Args:
+        detected_shapes_image_path (str): Path to the image with detected shapes (output of detect_shapes).
+        output_heatmap_path (str): Path to save the resulting obstacle heatmap.
+    """
+    # Load the detected shapes image
+    image = cv2.imread(detected_shapes_image_path)
+    if image is None:
+        raise ValueError(f"Error: Unable to load the image at {detected_shapes_image_path}!")
+
+    # Convert the image to grayscale for contour detection
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Detect edges using Canny edge detection
+    edges = cv2.Canny(gray, 50, 150)
+
+    # Find contours in the edge map
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Create a blank obstacle heatmap
+    obstacle_map = np.zeros_like(gray, dtype=np.float32)
+
+    # Fill the obstacle map based on contours
+    for contour in contours:
+        # Assign high heat value (e.g., 1.0) to pixels inside obstacles (contours)
+        cv2.drawContours(obstacle_map, [contour], -1, 1.0, thickness=cv2.FILLED)
+
+    # Normalize the obstacle map to range [0, 255] for visualization
+    obstacle_map_normalized = cv2.normalize(obstacle_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+    # Apply a colormap for visualization
+    # COLORMAP_JET transitions from blue (cool) to red (warm) smoothly
+    obstacle_heatmap = cv2.applyColorMap(obstacle_map_normalized, cv2.COLORMAP_JET)
+
+    # Save the resulting obstacle heatmap
+    cv2.imwrite(output_heatmap_path, obstacle_heatmap)
+    print(f"Obstacle heatmap saved to {output_heatmap_path}")
+
+    # Display the heatmap using matplotlib for better visualization
+    plt.imshow(cv2.cvtColor(obstacle_heatmap, cv2.COLOR_BGR2RGB))
+    plt.title("Obstacle Heatmap")
+    plt.axis("off")
+    plt.show()
+
+    # Return the obstacle map as a numpy array for further analysis if needed
+    return obstacle_map
+
+def generate_smooth_obstacle_heatmap(detected_shapes_image_path, output_heatmap_path):
+    """
+    Generate a smooth obstacle heatmap where:
+      - Inside shapes (obstacles): Transition from red (edges) to orange/yellow (center).
+      - Outside shapes (free space): Transition from violet (near edges) to blue/green (far from obstacles).
+
+    Args:
+        detected_shapes_image_path (str): Path to the image with detected shapes (output of detect_shapes).
+        output_heatmap_path (str): Path to save the resulting smooth obstacle heatmap.
+    """
+    # Load the detected shapes image
+    image = cv2.imread(detected_shapes_image_path)
+    if image is None:
+        raise ValueError(f"Error: Unable to load the image at {detected_shapes_image_path}!")
+
+    # Convert the image to grayscale for contour detection
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Detect edges using Canny edge detection
+    edges = cv2.Canny(gray, 50, 150)
+
+    # Create a binary mask for obstacle regions
+    obstacle_mask = np.zeros_like(gray, dtype=np.uint8)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(obstacle_mask, contours, -1, 255, thickness=cv2.FILLED)
+
+    # Compute the distance transform for inside and outside the shapes
+    inside_distance = cv2.distanceTransform(obstacle_mask, cv2.DIST_L2, 5)
+    outside_distance = cv2.distanceTransform(cv2.bitwise_not(obstacle_mask), cv2.DIST_L2, 5)
+
+    # Normalize distances to range [0, 1]
+    inside_distance_normalized = inside_distance / np.max(inside_distance)
+    outside_distance_normalized = outside_distance / np.max(outside_distance)
+
+    # Combine inside and outside distances into a single temperature map
+    temperature_map = np.zeros_like(inside_distance_normalized, dtype=np.float32)
+    temperature_map[obstacle_mask > 0] = 0.5 + 0.5 * inside_distance_normalized[obstacle_mask > 0]  # Red to Yellow
+    temperature_map[obstacle_mask == 0] = 0.5 * (1 - outside_distance_normalized[obstacle_mask == 0])  # Violet to Blue/Green
+
+    # Normalize the temperature map to range [0, 255] for visualization
+    temperature_map_normalized = cv2.normalize(temperature_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+    # Apply a colormap for visualization
+    # COLORMAP_JET transitions smoothly from violet (coolest) to red (warmest)
+    smooth_obstacle_heatmap = cv2.applyColorMap(temperature_map_normalized, cv2.COLORMAP_JET)
+
+    # Save the resulting heatmap
+    cv2.imwrite(output_heatmap_path, smooth_obstacle_heatmap)
+    print(f"Smooth obstacle heatmap saved to {output_heatmap_path}")
+
+    # Display the heatmap using matplotlib for better visualization
+    plt.imshow(cv2.cvtColor(smooth_obstacle_heatmap, cv2.COLOR_BGR2RGB))
+    plt.title("Smooth Obstacle Heatmap (Inside & Outside Transition)")
+    plt.axis("off")
+    plt.show()
+
+    # Return the temperature map as a numpy array for further analysis if needed
+    return temperature_map
+
+def generate_navigable_heatmap_v2(image_path, output_heatmap_path):
+    """
+    Generate a navigable heatmap where:
+      - Navigable areas are highlighted in cool tones (blue/green).
+      - Buffer zones are highlighted in intermediate tones (yellow).
+      - Obstacles are highlighted in warm tones (red).
+
+    Args:
+        image_path (str): Path to the input image.
+        output_heatmap_path (str): Path to save the resulting navigable heatmap image.
+    """
+    # Load the input image
+    image = cv2.imread(image_path)
+    if image is None:
+        raise ValueError(f"Error: Unable to read the image at {image_path}!")
+
+    # Resize the image for compatibility with MiDaS
+    input_height, input_width = 256, 256
+    image_resized = cv2.resize(image, (input_width, input_height))
+    image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
+
+    # Load MiDaS model
+    print("Loading MiDaS model...")
+    model = torch.hub.load('intel-isl/MiDaS', 'MiDaS_small', trust_repo=True)
+    model.eval()
+
+    # Use CPU or GPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # Prepare the image for the MiDaS model
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Resize((input_height, input_width)),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+    ])
+    input_tensor = transform(image_rgb).unsqueeze(0).to(device)
+
+    print("Performing depth estimation...")
+    with torch.no_grad():
+        depth_map = model(input_tensor).squeeze().cpu().numpy()
+
+    # Normalize the depth map for processing
+    depth_map_normalized = cv2.normalize(depth_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+    # Threshold depth map to identify navigable space
+    depth_threshold = 50  # Minimum clearance distance
+    navigable_space = np.where(depth_map > depth_threshold, 255, 0).astype(np.uint8)
+
+    # Detect obstacles using edge detection
+    edges = cv2.Canny(depth_map_normalized, 50, 150)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Create obstacle mask
+    obstacle_mask = np.zeros_like(depth_map_normalized)
+    cv2.drawContours(obstacle_mask, contours, -1, 255, thickness=cv2.FILLED)
+
+    # Create buffer zones
+    buffer_zone_mask = cv2.dilate(obstacle_mask, kernel=np.ones((15, 15), np.uint8), iterations=1)
+
+    # Create a combined heatmap
+    heatmap = np.zeros_like(depth_map_normalized, dtype=np.float32)
+    heatmap[navigable_space == 255] = 0.3
+
+    # Navigable areas (cool tones: blue/green)
+    heatmap[buffer_zone_mask == 255] = 0.6  # Buffer zones (intermediate tones: yellow)
+    heatmap[obstacle_mask == 255] = 1.0  # Obstacles (warm tones: red)
+
+    # Normalize the heatmap to range [0, 255] for visualization
+    heatmap_normalized = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+    # Apply a colormap for visualization
+    # COLORMAP_JET transitions smoothly from blue (coolest) to red (warmest)
+    navigable_heatmap = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
+
+    # Resize the heatmap back to the original image size
+    heatmap_resized = cv2.resize(navigable_heatmap, (image.shape[1], image.shape[0]))
+
+    # Save the resulting navigable heatmap
+    cv2.imwrite(output_heatmap_path, heatmap_resized)
+    print(f"Navigable heatmap saved to {output_heatmap_path}")
+
+    # Display the heatmap using matplotlib for better visualization
+    plt.imshow(cv2.cvtColor(heatmap_resized, cv2.COLOR_BGR2RGB))
+    plt.title("Navigable Heatmap (Smooth Transitions)")
+    plt.axis("off")
+    plt.show()
+
+    # Return the heatmap as a NumPy array for further analysis if needed
+    return heatmap
+
+def apply_boolean_mask_by_color(depth_heatmap_path, output_mask_path):
+    """
+    Apply a boolean mask to the depth_heatmap image, marking green, blue, and violet as True,
+    and orange, red, and yellow as False.
+
+    Args:
+        depth_heatmap_path (str): Path to the depth heatmap image.
+        output_mask_path (str): Path to save the resulting boolean mask image.
+    """
+    check_file_exists(depth_heatmap_path)
+
+    # Load the heatmap image
+    heatmap = cv2.imread(depth_heatmap_path)
+    if heatmap is None:
+        raise ValueError(f"Error: Unable to load the depth heatmap image at {depth_heatmap_path}!")
+
+    # Convert the heatmap to HSV color space
+    heatmap_hsv = cv2.cvtColor(heatmap, cv2.COLOR_BGR2HSV)
+
+    # Define the ranges for green, blue, and violet hues in HSV
+    # Hue ranges are approximate and may need adjustment depending on the colormap used
+    green_range = ((35, 50, 50), (85, 255, 255))  # Approx green hue range
+    blue_range = ((100, 50, 50), (140, 255, 255))  # Approx blue hue range
+    violet_range = ((140, 50, 50), (170, 255, 255))  # Approx violet hue range
+
+    # Create masks for each color range
+    green_mask = cv2.inRange(heatmap_hsv, green_range[0], green_range[1])
+    blue_mask = cv2.inRange(heatmap_hsv, blue_range[0], blue_range[1])
+    violet_mask = cv2.inRange(heatmap_hsv, violet_range[0], violet_range[1])
+
+    # Combine masks for green, blue, and violet (True)
+    true_mask = cv2.bitwise_or(cv2.bitwise_or(green_mask, blue_mask), violet_mask)
+
+    # Create a mask for orange, red, and yellow hues (False)
+    orange_range = ((10, 50, 50), (25, 255, 255))  # Approx orange hue range
+    red_range = ((0, 50, 50), (10, 255, 255))  # Approx red hue range
+    yellow_range = ((25, 50, 50), (35, 255, 255))  # Approx yellow hue range
+
+    orange_mask = cv2.inRange(heatmap_hsv, orange_range[0], orange_range[1])
+    red_mask = cv2.inRange(heatmap_hsv, red_range[0], red_range[1])
+    yellow_mask = cv2.inRange(heatmap_hsv, yellow_range[0], yellow_range[1])
+
+    false_mask = cv2.bitwise_or(cv2.bitwise_or(orange_mask, red_mask), yellow_mask)
+
+    # Create the final boolean mask
+    boolean_mask = np.zeros_like(true_mask, dtype=np.uint8)
+    boolean_mask[true_mask > 0] = 1  # True for green, blue, violet
+    boolean_mask[false_mask > 0] = 0  # False for orange, red, yellow
+
+    # Save the resulting mask as a visual image (optional)
+    visual_mask = (boolean_mask * 255).astype(np.uint8)  # Convert boolean mask to grayscale for visualization
+    cv2.imwrite(output_mask_path, visual_mask)
+    print(f"Boolean mask saved to {output_mask_path}")
+
+    # Display the boolean mask using matplotlib for better visualization
+    plt.imshow(boolean_mask, cmap="gray")
+    plt.title("Boolean Mask (Green/Blue/Violet = True, Orange/Red/Yellow = False)")
+    plt.axis("off")
+    plt.show()
+
+    return boolean_mask  # Return the boolean mask as a NumPy array for further analysis
 
 # Main Function
 def main():
@@ -489,6 +751,19 @@ def main():
             violet_grayscale_path,
             output_temp_heatmap_path,
         )
+
+        output_obstacle_heatmap_path = os.path.join(output_dir, "obstacle_heatmap.jpg")
+        generate_smooth_obstacle_heatmap(output_image_path_shapes, output_obstacle_heatmap_path)
+
+        #output_navigatable_v2_heatmap_path = os.path.join(output_dir, "navigatable_heatmap_v2.jpg")
+        #generate_navigable_heatmap_v2(output_image_path_navigable, output_navigatable_v2_heatmap_path)
+
+        output_image_path_depth_bool = os.path.join(output_dir, "depth_heatmap_bool.jpg")
+        output_temp_heatmap_path_bool = os.path.join(output_dir, "color_temp_heatmap_bool.jpg")
+        output_obstacle_heatmap_path_bool = os.path.join(output_dir, "obstacle_heatmap_bool.jpg")
+        apply_boolean_mask_by_color(output_image_path_depth, output_image_path_depth_bool)
+        apply_boolean_mask_by_color(output_temp_heatmap_path, output_temp_heatmap_path_bool)
+        apply_boolean_mask_by_color(output_obstacle_heatmap_path, output_obstacle_heatmap_path_bool)
 
     except FileNotFoundError as e:
         print(f"File not found error: {e}")
