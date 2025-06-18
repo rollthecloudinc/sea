@@ -5,3 +5,14 @@ pip3 install matplotlib
 pip3 install torch torchvision
 pip3 install timm
 pip3 install scikit-image
+
+
+conda install numpy
+conda install pillow
+conda install -c conda-forge opencv
+conda install matplotlib
+conda install pytorch torchvision torchaudio -c pytorch
+conda install -c conda-forge timm
+conda install scikit-image
+
+conda install -n sea -c conda-forge --all conda numpy pillow opencv matplotlib pytorch torchvision torchaudio timm scikit-image
