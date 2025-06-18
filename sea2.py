@@ -942,6 +942,41 @@ def main():
         else:
             print("\nNo superpixels found that are predominantly negative space.")
 
+       # 6. Superpixel Analysis from Temperature Boolean Mask
+        output_superpixel_visualization_path_temp = os.path.join(output_dir, "color_temp_heatmap_superpixel.jpg")
+        print("\n--- Identifying Negative Space Superpixels (from Temperature Mask) ---")
+        identified_superpixels_temp = identify_negative_superpixel(
+            original_image_path=input_image_path,
+            boolean_mask_path=output_temp_heatmap_path_bool, # <--- Using the new boolean mask
+            output_superpixel_visualization_path=output_superpixel_visualization_path_temp, # <--- New output path
+            num_superpixels=500,
+            compactness=20.0,
+            desired_pixel_coverage_percent=95.0, # Can be adjusted
+            visualize=True
+        )
+        if identified_superpixels_temp:
+            print(f"\nFound {len(identified_superpixels_temp)} negative superpixels from Temperature Mask.")
+        else:
+            print("\nNo superpixels found that are predominantly negative space from Temperature Mask.")
+
+        # 9. Superpixel Analysis from Obstacle Boolean Mask
+        print("\n--- Identifying Negative Space Superpixels (from Obstacle Mask) ---")
+        output_superpixel_visualization_path_obstacle = os.path.join(output_dir, "obstacle_heatmap_superpixel.jpg")
+        identified_superpixels_obstacle = identify_negative_superpixel(
+            original_image_path=input_image_path,
+            boolean_mask_path=output_obstacle_heatmap_path_bool,  # <--- Using the new boolean mask
+            output_superpixel_visualization_path=output_superpixel_visualization_path_obstacle,
+            # <--- New output path
+            num_superpixels=500,
+            compactness=20.0,
+            desired_pixel_coverage_percent=95.0,  # Can be adjusted
+            visualize=True
+        )
+        if identified_superpixels_obstacle:
+            print(f"\nFound {len(identified_superpixels_obstacle)} negative superpixels from Obstacle Mask.")
+        else:
+            print("\nNo superpixels found that are predominantly negative space from Obstacle Mask.")
+
     except FileNotFoundError as e:
         print(f"File not found error: {e}")
     except ValueError as e:
