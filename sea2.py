@@ -11,8 +11,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from collections import defaultdict # <--- ADD THIS LINE
 from depth import depth_estimation_heatmap
-from util import check_file_exists
-from shapes import detect_shapes
+from util import check_file_exists, apply_boolean_mask_by_color
+from shapes import detect_shapes, generate_smooth_obstacle_heatmap
 from color import extract_and_overlay_with_transparency, generate_temperature_heatmap
 
 # Texture Analysis using LBP
@@ -159,65 +159,6 @@ def generate_obstacle_heatmap(detected_shapes_image_path, output_heatmap_path):
     # Return the obstacle map as a numpy array for further analysis if needed
     return obstacle_map
 
-def generate_smooth_obstacle_heatmap(detected_shapes_image_path, output_heatmap_path):
-    """
-    Generate a smooth obstacle heatmap where:
-      - Inside shapes (obstacles): Transition from red (edges) to orange/yellow (center).
-      - Outside shapes (free space): Transition from violet (near edges) to blue/green (far from obstacles).
-
-    Args:
-        detected_shapes_image_path (str): Path to the image with detected shapes (output of detect_shapes).
-        output_heatmap_path (str): Path to save the resulting smooth obstacle heatmap.
-    """
-    # Load the detected shapes image
-    image = cv2.imread(detected_shapes_image_path)
-    if image is None:
-        raise ValueError(f"Error: Unable to load the image at {detected_shapes_image_path}!")
-
-    # Convert the image to grayscale for contour detection
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # Detect edges using Canny edge detection
-    edges = cv2.Canny(gray, 50, 150)
-
-    # Create a binary mask for obstacle regions
-    obstacle_mask = np.zeros_like(gray, dtype=np.uint8)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(obstacle_mask, contours, -1, 255, thickness=cv2.FILLED)
-
-    # Compute the distance transform for inside and outside the shapes
-    inside_distance = cv2.distanceTransform(obstacle_mask, cv2.DIST_L2, 5)
-    outside_distance = cv2.distanceTransform(cv2.bitwise_not(obstacle_mask), cv2.DIST_L2, 5)
-
-    # Normalize distances to range [0, 1]
-    inside_distance_normalized = inside_distance / np.max(inside_distance)
-    outside_distance_normalized = outside_distance / np.max(outside_distance)
-
-    # Combine inside and outside distances into a single temperature map
-    temperature_map = np.zeros_like(inside_distance_normalized, dtype=np.float32)
-    temperature_map[obstacle_mask > 0] = 0.5 + 0.5 * inside_distance_normalized[obstacle_mask > 0]  # Red to Yellow
-    temperature_map[obstacle_mask == 0] = 0.5 * (1 - outside_distance_normalized[obstacle_mask == 0])  # Violet to Blue/Green
-
-    # Normalize the temperature map to range [0, 255] for visualization
-    temperature_map_normalized = cv2.normalize(temperature_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
-    # Apply a colormap for visualization
-    # COLORMAP_JET transitions smoothly from violet (coolest) to red (warmest)
-    smooth_obstacle_heatmap = cv2.applyColorMap(temperature_map_normalized, cv2.COLORMAP_JET)
-
-    # Save the resulting heatmap
-    cv2.imwrite(output_heatmap_path, smooth_obstacle_heatmap)
-    print(f"Smooth obstacle heatmap saved to {output_heatmap_path}")
-
-    # Display the heatmap using matplotlib for better visualization
-    plt.imshow(cv2.cvtColor(smooth_obstacle_heatmap, cv2.COLOR_BGR2RGB))
-    plt.title("Smooth Obstacle Heatmap (Inside & Outside Transition)")
-    plt.axis("off")
-    plt.show()
-
-    # Return the temperature map as a numpy array for further analysis if needed
-    return temperature_map
-
 def generate_navigable_heatmap_v2(image_path, output_heatmap_path):
     """
     Generate a navigable heatmap where:
@@ -308,73 +249,6 @@ def generate_navigable_heatmap_v2(image_path, output_heatmap_path):
 
     # Return the heatmap as a NumPy array for further analysis if needed
     return heatmap
-
-def apply_boolean_mask_by_color(depth_heatmap_path, output_mask_path):
-    """
-    Apply a boolean mask to the depth_heatmap image, marking green, blue, and violet as True,
-    and orange, red, and yellow as False.
-
-    Args:
-        depth_heatmap_path (str): Path to the depth heatmap image.
-        output_mask_path (str): Path to save the resulting boolean mask image.
-    """
-    check_file_exists(depth_heatmap_path)
-
-    # Load the heatmap image
-    heatmap = cv2.imread(depth_heatmap_path)
-    if heatmap is None:
-        raise ValueError(f"Error: Unable to load the depth heatmap image at {depth_heatmap_path}!")
-
-    # --- ADD THIS DEBUG PRINT LINE ---
-    print(f"DEBUG (apply_boolean_mask_by_color): Loaded heatmap dtype: {heatmap.dtype}, shape: {heatmap.shape}")
-    # --- END DEBUG PRINT ---
-
-    # Convert the heatmap to HSV color space
-    heatmap_hsv = cv2.cvtColor(heatmap, cv2.COLOR_BGR2HSV)
-
-    # Define the ranges for green, blue, and violet hues in HSV
-    # Hue ranges are approximate and may need adjustment depending on the colormap used
-    green_range = ((35, 50, 50), (85, 255, 255))  # Approx green hue range
-    blue_range = ((100, 50, 50), (140, 255, 255))  # Approx blue hue range
-    violet_range = ((140, 50, 50), (170, 255, 255))  # Approx violet hue range
-
-    # Create masks for each color range
-    green_mask = cv2.inRange(heatmap_hsv, green_range[0], green_range[1])
-    blue_mask = cv2.inRange(heatmap_hsv, blue_range[0], blue_range[1])
-    violet_mask = cv2.inRange(heatmap_hsv, violet_range[0], violet_range[1])
-
-    # Combine masks for green, blue, and violet (True)
-    true_mask = cv2.bitwise_or(cv2.bitwise_or(green_mask, blue_mask), violet_mask)
-
-    # Create a mask for orange, red, and yellow hues (False)
-    orange_range = ((10, 50, 50), (25, 255, 255))  # Approx orange hue range
-    red_range = ((0, 50, 50), (10, 255, 255))  # Approx red hue range
-    yellow_range = ((25, 50, 50), (35, 255, 255))  # Approx yellow hue range
-
-    orange_mask = cv2.inRange(heatmap_hsv, orange_range[0], orange_range[1])
-    red_mask = cv2.inRange(heatmap_hsv, red_range[0], red_range[1])
-    yellow_mask = cv2.inRange(heatmap_hsv, yellow_range[0], yellow_range[1])
-
-    false_mask = cv2.bitwise_or(cv2.bitwise_or(orange_mask, red_mask), yellow_mask)
-
-    # Create the final boolean mask
-    boolean_mask = np.zeros_like(true_mask, dtype=np.uint8)
-    boolean_mask[true_mask > 0] = 1  # True for green, blue, violet
-    boolean_mask[false_mask > 0] = 0  # False for orange, red, yellow
-
-    # Save the resulting mask as a visual image (optional)
-    visual_mask = (boolean_mask * 255).astype(np.uint8)  # Convert boolean mask to grayscale for visualization
-    cv2.imwrite(output_mask_path, visual_mask)
-    print(f"Boolean mask saved to {output_mask_path}")
-
-    # Display the boolean mask using matplotlib for better visualization
-    plt.imshow(boolean_mask, cmap="gray")
-    plt.title("Boolean Mask (Green/Blue/Violet = True, Orange/Red/Yellow = False)")
-    plt.axis("off")
-    plt.show()
-
-    return boolean_mask  # Return the boolean mask as a NumPy array for further analysis
-
 
 # --- UPDATED FUNCTION: identify_negative_superpixel ---
 def identify_negative_superpixel(
