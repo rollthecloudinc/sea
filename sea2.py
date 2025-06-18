@@ -55,7 +55,7 @@ def main():
     output_image_path_texture = os.path.join(output_dir, "texture_analysis.jpg")
     output_image_path_navigable = os.path.join(output_dir, "navigable_heatmap.jpg")
 
-    # Color overlay paths
+    # Color overlay pathss
     grayscale_output_path_red = os.path.join(output_dir, "grayscale_red.jpg")
     transparent_overlay_output_path_red = os.path.join(output_dir, "transparent_red_overlay.png")
 
