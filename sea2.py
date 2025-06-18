@@ -1370,7 +1370,7 @@ def main():
         # --- NEW: Superpixel-level Overlap/Intersection Fusion ---
         print("\n--- Performing Superpixel-level Overlap/Intersection Fusion ---")
         # Define the minimum number of sources that must identify a superpixel as negative
-        min_overlap_sources = 2  # e.g., at least 2 out of 3 sources must agree
+        min_overlap_sources = 2  # e.g., at least 2 out  of 3 sources must agree
 
         fused_negative_superpixel_labels = find_overlapping_negative_superpixels(
             list_of_negative_superpixel_labels=all_negative_superpixel_label_lists,
