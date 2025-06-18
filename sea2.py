@@ -1213,6 +1213,90 @@ def create_fused_boolean_mask(segments: np.ndarray, fused_labels: list[int], out
 
     return fused_boolean_mask
 
+# If you don't have it already in this file:
+# def check_file_exists(file_path):
+#     if not os.path.exists(file_path):
+#         raise FileNotFoundError(f"File not found: {file_path}")
+def find_closest_negative_pixel_spiral(boolean_map: np.ndarray) -> tuple[int, int] | None:
+    """
+    Finds the coordinates (row, col) of the closest 'negative space' pixel (value 1)
+    in a boolean map, by spiraling outward from the center.
+
+    Args:
+        boolean_map (np.ndarray): A 2D NumPy array (uint8 or bool) where 1 represents
+                                  negative space and 0 represents non-negative space.
+
+    Returns:
+        tuple[int, int] | None: A tuple (row, col) of the closest negative pixel,
+                                or None if no negative pixel is found in the map.
+    """
+    if boolean_map is None or boolean_map.ndim != 2 or boolean_map.dtype not in [np.uint8, np.bool_]:
+        raise ValueError("Input boolean_map must be a 2D NumPy array of type uint8 or bool.")
+
+    rows, cols = boolean_map.shape
+
+    # Calculate the starting center coordinates
+    center_row = rows // 2
+    center_col = cols // 2
+
+    # Define directions: Right, Down, Left, Up (dx, dy)
+    dr = [0, 1, 0, -1]  # Change in row
+    dc = [1, 0, -1, 0]  # Change in column
+
+    current_row, current_col = center_row, center_col
+    direction_idx = 0  # Start moving right
+    step_length = 1  # Number of steps to take in the current direction
+    steps_taken_in_segment = 0
+
+    # Max possible distance to check is roughly the diagonal from center to corner
+    max_steps_overall = rows * cols  # A safe upper bound for total pixels to check
+
+    print(f"\n--- Searching for closest negative pixel spiraling from center ({center_row}, {center_col}) ---")
+
+    # Loop for spiral traversal
+    # Continue as long as we are within bounds
+    for _ in range(max_steps_overall):  # Prevent infinite loop on all-zero maps
+        # Check the current pixel
+        if 0 <= current_row < rows and 0 <= current_col < cols:
+            if boolean_map[current_row, current_col] == 1:
+                print(f"DEBUG: Found closest negative pixel at ({current_row}, {current_col}).")
+                return (current_row, current_col)
+        else:
+            # If we go out of bounds, no need to check further in this direction without a turn
+            # This 'else' branch helps prune the search if the map is small and we exit quickly.
+            # However, the subsequent checks on `current_row, current_col` will also catch this.
+            pass
+
+        # Move to the next pixel in the current direction
+        current_row += dr[direction_idx]
+        current_col += dc[direction_idx]
+        steps_taken_in_segment += 1
+
+        # Check if we need to change direction and potentially increase step length
+        if steps_taken_in_segment == step_length:
+            steps_taken_in_segment = 0  # Reset steps for new segment
+            direction_idx = (direction_idx + 1) % 4  # Change direction (0->1->2->3->0...)
+
+            # Increase step length after every two turns (e.g., after Right then Down, or Left then Up)
+            if direction_idx % 2 == 0:  # This means we've just completed a segment in the 'vertical' or 'horizontal' direction (Down or Up)
+                # and are about to start a new 'horizontal' or 'vertical' (Right or Left).
+                step_length += 1
+
+        # Additional check to break if we are completely out of bounds and not likely to re-enter
+        # This is more robust than just checking for `_ in range(max_steps_overall)`
+        if not (0 <= current_row < rows and 0 <= current_col < cols):
+            # We've spiraled off the map. If the center was the only point checked, and it's not 1,
+            # and we go out of bounds, no need to continue.
+            # This check prevents unnecessary loops after leaving the map.
+            # However, the loop `for _ in range(max_steps_overall)` provides a hard limit.
+            # A more precise check would involve checking if the entire map has been covered by the spiral.
+            # For simplicity, `max_steps_overall` is usually sufficient for bounded maps.
+            # A more robust solution might use a visited set for extremely sparse maps if desired.
+            pass  # Keep looping to ensure all reachable pixels are checked if it was a very large map.
+
+    print("DEBUG: No negative pixel found within the map using spiral search.")
+    return None  # No negative pixel found
+
 # Main Function
 def main():
     # Input and output paths
@@ -1472,6 +1556,16 @@ def main():
             fused_negative_superpixel_labels,
             output_fused_boolean_mask_path
         )
+
+        # --- NEW: Find the closest negative pixel using the spiral algorithm ---
+        closest_pixel_coords = find_closest_negative_pixel_spiral(fused_boolean_array)
+
+        if closest_pixel_coords:
+            print(f"Closest negative space pixel found at (row, col): {closest_pixel_coords}")
+            # You can visualize this point on the original image if you like
+            # e.g., using cv2.circle on image_rgb or a copy of it
+        else:
+            print("No negative space pixels found in the fused boolean mask.")
 
 
     except FileNotFoundError as e:
