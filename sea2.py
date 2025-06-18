@@ -46,7 +46,11 @@ def main():
     all_negative_superpixel_label_lists = [] # <--- It starts here as an empty list
 
     # Output file paths
+
+    # DEPTH ---------------------------------------------------------------
     output_image_path_depth = os.path.join(output_dir, "depth_heatmap.jpg")
+    # ----------------------------------------------------------------------
+
     output_image_path_shapes = os.path.join(output_dir, "shapes_detected.jpg")
     output_image_path_texture = os.path.join(output_dir, "texture_analysis.jpg")
     output_image_path_navigable = os.path.join(output_dir, "navigable_heatmap.jpg")
@@ -72,9 +76,10 @@ def main():
 
     # Run all processing functions
     try:
-        # Depth Estimation
+        # Depth Estimation -------------------------------------------------
         print("Running depth estimation heatmap...")
         depth_estimation_heatmap(input_image_path, output_image_path_depth)
+        # -----------------------------------------------------------------
 
         # Shape Detection
         print("Running shape detection...")
@@ -165,10 +170,16 @@ def main():
         output_image_path_depth_bool = os.path.join(output_dir, "depth_heatmap_bool.jpg")
         output_temp_heatmap_path_bool = os.path.join(output_dir, "color_temp_heatmap_bool.jpg")
         output_obstacle_heatmap_path_bool = os.path.join(output_dir, "obstacle_heatmap_bool.jpg")
+
+        # DEPTH --------------------------------------------------------------------------
         apply_boolean_mask_by_color(output_image_path_depth, output_image_path_depth_bool)
+        # --------------------------------------------------------------------------------
+
+
         apply_boolean_mask_by_color(output_temp_heatmap_path, output_temp_heatmap_path_bool)
         apply_boolean_mask_by_color(output_obstacle_heatmap_path, output_obstacle_heatmap_path_bool)
 
+        # DEPTH -----------------------------------------------------------------------------------
         # 3. Identify Negative Superpixels (now uses the pre-computed boolean mask)
         output_superpixel_visualization_path = os.path.join(output_dir, "depth_heatmap_superpixel.jpg")
         print("\n--- Identifying Negative Space Superpixels ---")
@@ -187,6 +198,7 @@ def main():
             all_negative_superpixel_label_lists.append(identified_superpixels)
         else:
             print("\nNo superpixels found that are predominantly negative space.")
+        # --------------------------------------------------------------------------------------------
 
        # 6. Superpixel Analysis from Temperature Boolean Mask
         output_superpixel_visualization_path_temp = os.path.join(output_dir, "color_temp_heatmap_superpixel.jpg")
