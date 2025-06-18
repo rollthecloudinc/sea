@@ -1141,6 +1141,78 @@ def visualize_specific_superpixels(
     cv2.imwrite(output_path, visualized_image_bgr)
     print(f"Specific superpixel visualization saved to {output_path}")
 
+# (Ensure check_file_exists is defined or imported in this file)
+# def check_file_exists(file_path):
+#     if not os.path.exists(file_path):
+#         raise FileNotFoundError(f"File not found: {file_path}")
+
+# Assuming check_file_exists is defined elsewhere in this file or imported.
+# If not, you might need to add it here:
+# def check_file_exists(file_path):
+#     if not os.path.exists(file_path):
+#         raise FileNotFoundError(f"File not found: {file_path}")
+
+def create_fused_boolean_mask(segments: np.ndarray, fused_labels: list[int], output_mask_path: str) -> np.ndarray:
+    """
+    Creates a binary boolean mask image based on a list of fused superpixel labels.
+
+    Args:
+        segments (np.ndarray): The superpixel segmentation map (output from SLIC),
+                               where each pixel's value is its superpixel label.
+        fused_labels (list[int]): A list of superpixel labels that are considered 'fused negative'.
+        output_mask_path (str): Path to save the resulting binary mask image.
+
+    Returns:
+        np.ndarray: The resulting boolean mask (0s and 1s) as a NumPy array.
+    """
+    if segments is None or segments.ndim < 2:
+        raise ValueError("Segments array must be a valid NumPy array with at least 2 dimensions.")
+    if not isinstance(fused_labels, list):
+        raise TypeError("Fused labels must be a list of integers.")
+
+    print(f"\n--- Creating Fused Boolean Mask ---")
+
+    # Get the dimensions from the segments array
+    height, width = segments.shape[:2]
+
+    # Initialize a blank boolean mask (all zeros/False)
+    fused_boolean_mask = np.zeros((height, width), dtype=np.uint8)
+
+    # Iterate through the fused labels and set corresponding pixels to 1 (True)
+    for label in fused_labels:
+        # Create a boolean mask for the current superpixel label
+        # Set pixels belonging to this label in the fused_boolean_mask to 1
+        fused_boolean_mask[segments == label] = 1
+
+    # Save the resulting mask as a visual grayscale image (0=black, 255=white)
+    visual_output_mask = (fused_boolean_mask * 255).astype(np.uint8)
+
+    # --- DEBUG PRINTS FOR IMWRITE ISSUE ---
+    print(f"DEBUG (create_fused_boolean_mask): Attempting to save to path: '{output_mask_path}'")
+
+    # Get the directory part of the path
+    output_dir = os.path.dirname(output_mask_path)
+    if not output_dir:  # If output_mask_path is just a filename (e.g., "mask.jpg"), dir is current '.'
+        output_dir = "."
+
+    print(f"DEBUG (create_fused_boolean_mask): Parent directory for saving: '{output_dir}'")
+    print(f"DEBUG (create_fused_boolean_mask): Parent directory exists: {os.path.exists(output_dir)}")
+    print(
+        f"DEBUG (create_fused_boolean_mask): Image data to save - shape: {visual_output_mask.shape}, Dtype: {visual_output_mask.dtype}, Channels: {visual_output_mask.ndim}")
+    # --- END DEBUG PRINTS ---
+
+    # Attempt to write the image
+    cv2.imwrite(output_mask_path, visual_output_mask)
+    print(f"Fused boolean mask saved to {output_mask_path}")
+
+    # Display the boolean mask using matplotlib
+    plt.imshow(fused_boolean_mask, cmap="gray")
+    plt.title("Fused Negative Superpixels Boolean Mask")
+    plt.axis("off")
+    plt.show()
+
+    return fused_boolean_mask
+
 # Main Function
 def main():
     # Input and output paths
@@ -1392,6 +1464,14 @@ def main():
             )
         else:
             print("\nNo superpixels found that meet the minimum overlap criteria for fusion.")
+
+        # --- NEW: Create and save the fused boolean mask ---
+        output_fused_boolean_mask_path = os.path.join(output_dir, "superpixel_fusion_map_bool.jpg")
+        fused_boolean_array = create_fused_boolean_mask(
+            segments,
+            fused_negative_superpixel_labels,
+            output_fused_boolean_mask_path
+        )
 
 
     except FileNotFoundError as e:
