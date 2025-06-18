@@ -1,3 +1,4 @@
+import threading
 import os
 import cv2
 import numpy as np
@@ -9,13 +10,15 @@ import colorsys
 from PIL import Image
 import matplotlib.pyplot as plt
 from collections import defaultdict
+import concurrent.futures # Import for ThreadPoolExecutor
 
 # Import all custom utility functions and modules
+# Ensure these imports correctly point to your local files
 from depth import depth_estimation_heatmap
 from util import (
     check_file_exists,
     apply_boolean_mask_by_color,
-    identify_negative_superpixel,
+    identify_negative_superpixel, # This is the function we'll parallelize calls to
     find_overlapping_negative_superpixels,
     visualize_specific_superpixels,
     create_fused_boolean_mask,
@@ -93,30 +96,25 @@ def perform_initial_analyses(image_path, paths):
     generate_navigable_heatmap(image_path, paths["navigable_heatmap"])
 
     print("Running color overlays...")
-    extract_and_overlay_with_transparency(
-        image_path=image_path, grayscale_path=paths["grayscale_red"],
-        overlay_path=paths["transparent_red_overlay"], hue_min=0, hue_max=30, highlight_color=(255, 0, 0, 128)
-    )
-    extract_and_overlay_with_transparency(
-        image_path=image_path, grayscale_path=paths["grayscale_blue"],
-        overlay_path=paths["transparent_blue_overlay"], hue_min=200, hue_max=240, highlight_color=(0, 0, 255, 128)
-    )
-    extract_and_overlay_with_transparency(
-        image_path=image_path, grayscale_path=paths["grayscale_yellow"],
-        overlay_path=paths["transparent_yellow_overlay"], hue_min=45, hue_max=75, highlight_color=(255, 255, 0, 128)
-    )
-    extract_and_overlay_with_transparency(
-        image_path=image_path, grayscale_path=paths["grayscale_orange"],
-        overlay_path=paths["transparent_orange_overlay"], hue_min=30, hue_max=60, highlight_color=(255, 165, 0, 128)
-    )
-    extract_and_overlay_with_transparency(
-        image_path=image_path, grayscale_path=paths["grayscale_green"],
-        overlay_path=paths["transparent_green_overlay"], hue_min=90, hue_max=150, highlight_color=(0, 255, 0, 128)
-    )
-    extract_and_overlay_with_transparency(
-        image_path=image_path, grayscale_path=paths["grayscale_violet"],
-        overlay_path=paths["transparent_violet_overlay"], hue_min=270, hue_max=300, highlight_color=(128, 0, 128, 128)
-    )
+    # List of arguments for each thread
+    thread_args_list = [
+        (image_path, paths["grayscale_red"], paths["transparent_red_overlay"], 0, 30, (255, 0, 0, 128)),
+        (image_path, paths["grayscale_blue"], paths["transparent_blue_overlay"], 200, 240, (0, 0, 255, 128)),
+        (image_path, paths["grayscale_yellow"], paths["transparent_yellow_overlay"], 45, 75, (255, 255, 0, 128)),
+        (image_path, paths["grayscale_orange"], paths["transparent_orange_overlay"], 30, 60, (255, 165, 0, 128)),
+        (image_path, paths["grayscale_green"], paths["transparent_green_overlay"], 90, 150, (0, 255, 0, 128)),
+        (image_path, paths["grayscale_violet"], paths["transparent_violet_overlay"], 270, 300, (128, 0, 128, 128)),
+    ]
+    threads = []
+    print("Starting color extraction operations in parallel threads...")
+    for args in thread_args_list:
+        # Create a thread for each operation
+        thread = threading.Thread(target=extract_and_overlay_with_transparency, args=args)
+        threads.append(thread)
+        thread.start() # Start the thread
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join() # This blocks until the thread finishes
 
     print("Generating color temperature heatmap...")
     generate_temperature_heatmap(
@@ -128,6 +126,7 @@ def perform_initial_analyses(image_path, paths):
     print("Generating smooth obstacle heatmap...")
     generate_smooth_obstacle_heatmap(paths["shapes_detected"], paths["obstacle_heatmap"])
 
+
 def generate_boolean_masks(paths):
     """Applies boolean masks to generated heatmaps."""
     print("--- Generating Boolean Masks ---")
@@ -135,56 +134,65 @@ def generate_boolean_masks(paths):
     apply_boolean_mask_by_color(paths["color_temp_heatmap"], paths["color_temp_heatmap_bool"])
     apply_boolean_mask_by_color(paths["obstacle_heatmap"], paths["obstacle_heatmap_bool"])
 
+
+# --- MODIFIED: Parallelized identify_negative_superpixels_from_sources ---
 def identify_negative_superpixels_from_sources(original_image_path, segments, paths):
-    """Identifies negative superpixels from various boolean mask sources."""
+    """
+    Identifies negative superpixels from various boolean mask sources in parallel.
+    Returns a list of lists, where each inner list contains superpixel labels
+    identified as negative by one source.
+    """
     all_negative_superpixel_label_lists = []
 
-    print("\n--- Identifying Negative Space Superpixels (from Depth Mask) ---")
-    identified_superpixels_depth = identify_negative_superpixel(
-        original_image_path=original_image_path,
-        boolean_mask_path=paths["depth_heatmap_bool"],
-        output_superpixel_visualization_path=paths["depth_heatmap_superpixel"],
-        desired_pixel_coverage_percent=DESIRED_PIXEL_COVERAGE_PERCENT,
-        visualize=True,
-        segments=segments
-    )
-    if identified_superpixels_depth:
-        print(f"Found {len(identified_superpixels_depth)} negative superpixels from Depth Mask.")
-        all_negative_superpixel_label_lists.append(identified_superpixels_depth)
-    else:
-        print("No superpixels found that are predominantly negative space from Depth Mask.")
+    # Define a helper function to be executed by each thread
+    def _run_identify_and_collect(mask_type, boolean_mask_path, superpixel_viz_path, results_list):
+        print(f"\n--- Identifying Negative Space Superpixels (from {mask_type} Mask) ---")
+        identified_superpixels = identify_negative_superpixel(
+            original_image_path=original_image_path,
+            boolean_mask_path=boolean_mask_path,
+            output_superpixel_visualization_path=superpixel_viz_path,
+            desired_pixel_coverage_percent=DESIRED_PIXEL_COVERAGE_PERCENT,
+            visualize=True,
+            segments=segments # Pass segments directly
+        )
+        if identified_superpixels:
+            print(f"Found {len(identified_superpixels)} negative superpixels from {mask_type} Mask.")
+            results_list.append(identified_superpixels) # Append directly, as list append is mostly atomic
+        else:
+            print(f"No superpixels found that are predominantly negative space from {mask_type} Mask.")
 
-    print("\n--- Identifying Negative Space Superpixels (from Temperature Mask) ---")
-    identified_superpixels_temp = identify_negative_superpixel(
-        original_image_path=original_image_path,
-        boolean_mask_path=paths["color_temp_heatmap_bool"],
-        output_superpixel_visualization_path=paths["color_temp_heatmap_superpixel"],
-        desired_pixel_coverage_percent=DESIRED_PIXEL_COVERAGE_PERCENT,
-        visualize=True,
-        segments=segments
-    )
-    if identified_superpixels_temp:
-        print(f"Found {len(identified_superpixels_temp)} negative superpixels from Temperature Mask.")
-        all_negative_superpixel_label_lists.append(identified_superpixels_temp)
-    else:
-        print("No superpixels found that are predominantly negative space from Temperature Mask.")
+    # Use ThreadPoolExecutor for parallel execution
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        futures = []
+        # Submit tasks for each source
+        futures.append(executor.submit(
+            _run_identify_and_collect,
+            "Depth", paths["depth_heatmap_bool"], paths["depth_heatmap_superpixel"],
+            all_negative_superpixel_label_lists # Pass the shared list
+        ))
+        futures.append(executor.submit(
+            _run_identify_and_collect,
+            "Temperature", paths["color_temp_heatmap_bool"], paths["color_temp_heatmap_superpixel"],
+            all_negative_superpixel_label_lists # Pass the shared list
+        ))
+        futures.append(executor.submit(
+            _run_identify_and_collect,
+            "Obstacle", paths["obstacle_heatmap_bool"], paths["obstacle_heatmap_superpixel"],
+            all_negative_superpixel_label_lists # Pass the shared list
+        ))
 
-    print("\n--- Identifying Negative Space Superpixels (from Obstacle Mask) ---")
-    identified_superpixels_obstacle = identify_negative_superpixel(
-        original_image_path=original_image_path,
-        boolean_mask_path=paths["obstacle_heatmap_bool"],
-        output_superpixel_visualization_path=paths["obstacle_heatmap_superpixel"],
-        desired_pixel_coverage_percent=DESIRED_PIXEL_COVERAGE_PERCENT,
-        visualize=True,
-        segments=segments
-    )
-    if identified_superpixels_obstacle:
-        print(f"Found {len(identified_superpixels_obstacle)} negative superpixels from Obstacle Mask.")
-        all_negative_superpixel_label_lists.append(identified_superpixels_obstacle)
-    else:
-        print("No superpixels found that are predominantly negative space from Obstacle Mask.")
+        # Wait for all futures to complete (optional, but good for sequential logic)
+        for future in concurrent.futures.as_completed(futures):
+            # You can check for exceptions here if needed:
+            # try:
+            #     future.result()
+            # except Exception as exc:
+            #     print(f'Generated an exception: {exc}')
+            pass # Results are appended directly in _run_identify_and_collect
 
+    print("\n--- All parallel superpixel identification operations completed ---")
     return all_negative_superpixel_label_lists
+
 
 def perform_superpixel_fusion(original_image_path, segments, all_negative_superpixel_label_lists, paths):
     """Fuses negative superpixels from multiple sources and finds the closest negative pixel."""
@@ -205,7 +213,7 @@ def perform_superpixel_fusion(original_image_path, segments, all_negative_superp
             output_path=paths["superpixel_fusion_map"],
             segments=segments,
             superpixel_labels_to_highlight=fused_negative_superpixel_labels,
-            highlight_color=(0, 0, 255),  # Red for danger
+            highlight_color=(0, 0, 255),  # Red for danger (or green for negative space?)
         )
         fused_boolean_array = create_fused_boolean_mask(
             segments,
@@ -218,6 +226,11 @@ def perform_superpixel_fusion(original_image_path, segments, all_negative_superp
 
         if closest_pixel_coords:
             print(f"Closest negative space pixel found at (row, col): {closest_pixel_coords}")
+            # Optional: Draw the closest pixel on the original image for final visualization
+            original_image = cv2.imread(original_image_path)
+            if original_image is not None:
+                cv2.circle(original_image, (closest_pixel_coords[1], closest_pixel_coords[0]), 5, (0, 0, 255), -1)
+                cv2.imwrite(os.path.join(OUTPUT_DIR, "final_image_with_closest_pixel.png"), original_image)
         else:
             print("No negative space pixels found in the fused boolean mask.")
     else:
@@ -243,11 +256,18 @@ def main():
     print(f"Generated {segments.max() + 1} superpixel segments for the image.")
 
     try:
+        # Stage 1: Initial analyses (some parts already parallelized within here)
         perform_initial_analyses(INPUT_IMAGE_PATH, paths)
+
+        # Stage 2: Generate boolean masks (sequential here, but quick)
         generate_boolean_masks(paths)
+
+        # Stage 3: Identify negative superpixels from sources (NOW PARALLELIZED)
         all_negative_superpixel_label_lists = identify_negative_superpixels_from_sources(
             INPUT_IMAGE_PATH, segments, paths
         )
+
+        # Stage 4: Superpixel fusion and closest pixel finding (sequential after parallel parts)
         perform_superpixel_fusion(INPUT_IMAGE_PATH, segments, all_negative_superpixel_label_lists, paths)
 
     except FileNotFoundError as e:
