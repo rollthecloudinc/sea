@@ -498,3 +498,39 @@ def find_closest_negative_pixel_spiral(boolean_map: np.ndarray) -> tuple[int, in
 
     print("DEBUG: No negative pixel found within the map using spiral search.")
     return None  # No negative pixel found
+
+def calculate_vector_from_center(image_width, image_height, target_pixel_coords):
+    """
+    Calculates the angle and magnitude of the vector from the image center
+    to a target pixel.
+
+    Args:
+        image_width (int): The width of the image.
+        image_height (int): The height of the image.
+        target_pixel_coords (tuple): A tuple (row, col) representing the target pixel.
+
+    Returns:
+        tuple: A tuple containing (magnitude, angle_degrees).
+               Angle is in degrees, where 0 is to the right (positive x-axis),
+               and increases counter-clockwise.
+    """
+    center_x = image_width / 2
+    center_y = image_height / 2
+
+    # target_pixel_coords is (row, col), which maps to (y, x) in image coordinates
+    target_x = target_pixel_coords[1]
+    target_y = target_pixel_coords[0]
+
+    # Calculate vector components (target - center)
+    vector_x = target_x - center_x
+    vector_y = -(target_y - center_y) # Invert y-axis for standard Cartesian angle (up is positive)
+
+    magnitude = np.sqrt(vector_x**2 + vector_y**2)
+    angle_rad = np.arctan2(vector_y, vector_x)
+    angle_degrees = np.degrees(angle_rad)
+
+    # Normalize angle to be between 0 and 360 degrees
+    if angle_degrees < 0:
+        angle_degrees += 360
+
+    return magnitude, angle_degrees

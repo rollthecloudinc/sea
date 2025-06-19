@@ -23,6 +23,7 @@ from util import (
     visualize_specific_superpixels,
     create_fused_boolean_mask,
     find_closest_negative_pixel_spiral,
+    calculate_vector_from_center
 )
 from shapes import detect_shapes, generate_smooth_obstacle_heatmap, generate_navigable_heatmap, generate_obstacle_heatmap
 from color import extract_and_overlay_with_transparency, generate_temperature_heatmap
@@ -152,7 +153,7 @@ def identify_negative_superpixels_from_sources(original_image_path, segments, pa
             boolean_mask_path=boolean_mask_path,
             output_superpixel_visualization_path=superpixel_viz_path,
             desired_pixel_coverage_percent=DESIRED_PIXEL_COVERAGE_PERCENT,
-            visualize=True,
+            visualize=False,
             segments=segments # Pass segments directly
         )
         if identified_superpixels:
@@ -229,6 +230,10 @@ def perform_superpixel_fusion(original_image_path, segments, all_negative_superp
             # Optional: Draw the closest pixel on the original image for final visualization
             original_image = cv2.imread(original_image_path)
             if original_image is not None:
+                image_height, image_width, _ = original_image.shape
+                magnitude, angle = calculate_vector_from_center(image_width, image_height, closest_pixel_coords)
+                print(f"  Magnitude: {magnitude:.2f} pixels")
+                print(f"  Angle: {angle:.2f} degrees (relative to center, 0=right, counter-clockwise)")
                 cv2.circle(original_image, (closest_pixel_coords[1], closest_pixel_coords[0]), 5, (0, 0, 255), -1)
                 cv2.imwrite(os.path.join(OUTPUT_DIR, "final_image_with_closest_pixel.png"), original_image)
         else:
